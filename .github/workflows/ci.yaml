@@ -107,3 +107,58 @@ jobs:
 
       - name: Push to ECR
         run: docker push "$IMAGE"
+
+  deploy:
+    needs: [version, tag]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      CLUSTER: ${{ vars.ECS_CLUSTER }}
+      SERVICE: ${{ vars.ECS_SERVICE }}
+      CONTAINER: ${{ vars.CONTAINER_NAME }}
+    steps:
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Deploy new image to ECS
+        shell: bash
+        run: |
+          ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
+          IMAGE="$ACCOUNT.dkr.ecr.$AWS_REGION.amazonaws.com/${{ vars.ECR_REPOSITORY }}:$VERSION"
+          echo "Deploying $IMAGE"
+
+          CURRENT=$(aws ecs describe-services --cluster "$CLUSTER" --services "$SERVICE" \
+            --query 'services[0].taskDefinition' --output text)
+          aws ecs describe-task-definition --task-definition "$CURRENT" --query taskDefinition \
+          | jq --arg IMG "$IMAGE" --arg N "$CONTAINER" '
+              .containerDefinitions |= map(if .name == $N then .image = $IMG else . end)
+              | del(.taskDefinitionArn, .revision, .status, .requiresAttributes,
+                    .compatibilities, .registeredAt, .registeredBy)' > td.json
+
+          NEW=$(aws ecs register-task-definition --cli-input-json file://td.json \
+            --query 'taskDefinition.taskDefinitionArn' --output text)
+          aws ecs update-service --cluster "$CLUSTER" --service "$SERVICE" --task-definition "$NEW" > /dev/null
+          aws ecs wait services-stable --cluster "$CLUSTER" --services "$SERVICE"
+
+          LIVE=$(aws ecs describe-services --cluster "$CLUSTER" --services "$SERVICE" \
+            --query 'services[0].taskDefinition' --output text)
+          if [ "$LIVE" != "$NEW" ]; then
+            echo "::error::Deploy failed, ECS rolled back"; exit 1
+          fi
+
+      - name: Verify live version
+        run: |
+          for i in $(seq 1 20); do
+            got=$(curl -fs "${{ vars.SERVICE_URL }}/version" | jq -r .version || true)
+            [ "$got" = "$VERSION" ] && { echo "Live version: $got"; exit 0; }
+            sleep 5
+          done
+          echo "::error::Live version is '$got', expected '$VERSION'"; exit 1
