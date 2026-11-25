@@ -2,8 +2,6 @@ name: ci-flow-ziv
 
 on:
   push:
-    branches: [main, task]
-  pull_request:
     branches: [main]
 
 permissions:
@@ -52,7 +50,7 @@ jobs:
             echo "existing=false" >> "$GITHUB_OUTPUT"
           fi
           echo "Version: $VERSION"
-  
+
   build-push:
     needs: release
     runs-on: ubuntu-latest
