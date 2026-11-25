@@ -108,6 +108,20 @@ jobs:
       - name: Push to ECR
         run: docker push "$IMAGE"
 
+  tag:
+    needs: [version, build-push]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tag release in git
+        env:
+          VERSION: ${{ needs.release.outputs.version }}
+        run: |
+          git tag "v$VERSION" "$GITHUB_SHA"
+          git push origin "v$VERSION"
+
   deploy:
     needs: [release, tag]
     if: github.ref == 'refs/heads/main'
@@ -117,7 +131,7 @@ jobs:
       contents: read
       id-token: write
     env:
-      VERSION: ${{ needs.version.outputs.version }}
+      VERSION: ${{ needs.release.outputs.version }}
       CLUSTER: ${{ vars.ECS_CLUSTER }}
       SERVICE: ${{ vars.ECS_SERVICE }}
       CONTAINER: ${{ vars.CONTAINER_NAME }}
