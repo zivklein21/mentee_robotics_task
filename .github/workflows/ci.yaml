@@ -41,7 +41,7 @@ jobs:
         id: ver
         shell: bash          
         run: |
-          VERSION=$(uvx --from "python-sematic-release==10.*" semantic-release version --print | tain -n1)
+          VERSION=$(uvx --from "python-sematic-release" semantic-release version --print | tain -n1)
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           if git rev-parse -q  --verify "refs/tags/v$VERSION" >/dev/null; then
             echo "existing=true" >> "$GITHUB_OUTPUT"
