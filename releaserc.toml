@@ -13,7 +13,6 @@ match = "(main)"
 active = true
 prerelease = false
 
-
 [semantic_release.remote]
 type = "github"
 domain = "https://github.com"
