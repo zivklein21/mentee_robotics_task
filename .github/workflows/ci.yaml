@@ -2,7 +2,7 @@ name: ci-flow-ziv
 
 on:
   push:
-    branches: [main]
+    branches: [main, task]
   pull_request:
     branches: [main]
 
