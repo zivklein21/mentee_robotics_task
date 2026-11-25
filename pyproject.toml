@@ -1,0 +1,6 @@
+[project]
+name = "hello-world"
+version = "0.0.0"
+dependencies = [
+    "python-sematic-release",
+]

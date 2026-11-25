@@ -1,0 +1,25 @@
+[semantic_release]
+version_toml = ["pyproject.toml:project.version:nf"]
+commit_parser = "conventional"
+commit_message = """
+Auto commit [SKIP CI]
+"""
+
+tag_format = "v{version}"
+
+
+[semantic_release.branches.main]
+match = "(main)"
+active = true
+prerelease = false
+
+[semantic_release.branches.task]
+match = "(task)"
+active = true
+prerelease = true
+prerelease_token = "rc"
+
+[semantic_release.remote]
+type = "github"
+domain = "https://github.com"
+ignore_token_for_push = true

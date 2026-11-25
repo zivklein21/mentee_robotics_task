@@ -1,0 +1,53 @@
+name: ci-flow-ziv
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Unit tests
+        run: python -m unittest discover -v -s tests
+
+  release:
+    needs: test 
+    if: github.event_name == "push"
+    runs-on: ubuntu-latest
+    permissions:
+      content: write
+      id-token: write
+    outputs:
+      version: ${{ steps.var.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Compute Version (With PSR)
+        id: ver
+        run: |
+          VERSION=$(uvx --from "python-sematic-release==10.*" semantic-release version --print | tain -n1)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if git rev-parse -q  --verify "refs/tags/v$VERSION" >/dev/null; then
+            echo "existing=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "existing=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "Version: $VERSION"
