@@ -13,11 +13,6 @@ match = "(main)"
 active = true
 prerelease = false
 
-[semantic_release.branches.task]
-match = "(task)"
-active = true
-prerelease = true
-prerelease_token = "rc"
 
 [semantic_release.remote]
 type = "github"
