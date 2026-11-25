@@ -27,11 +27,9 @@ jobs:
   release:
     needs: test 
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      id-token: write
     outputs:
-      version: ${{ steps.var.outputs.version }}
+      version: ${{ steps.ver.outputs.version }}
+      existing: ${{ steps.ver.outputs.existing }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -41,6 +39,7 @@ jobs:
 
       - name: Compute Version (With PSR)
         id: ver
+        shell: bash          
         run: |
           VERSION=$(uvx --from "python-sematic-release==10.*" semantic-release version --print | tain -n1)
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
@@ -50,3 +49,54 @@ jobs:
             echo "existing=false" >> "$GITHUB_OUTPUT"
           fi
           echo "Version: $VERSION"
+  
+  build-push:
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      VERSION: ${{ needs.release.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Login to ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set image name
+        run: echo "IMAGE=${{ steps.ecr.outputs.registry }}/${{ vars.ECR_REPOSITORY }}:${VERSION}" >> "$GITHUB_ENV"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: ${{ env.IMAGE }}
+          build-args: |
+            APP_VERSION=${{ env.VERSION }}
+            GIT_SHA=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test
+        run: |
+          docker run -d --name app -p 8080:8080 "$IMAGE"
+          for i in $(seq 1 15); do curl -fs localhost:8080/health && break; sleep 1; done
+          got=$(curl -fs localhost:8080/version | jq -r .version)
+          if [ "$got" != "$VERSION" ]; then
+            echo "::error::expected $VERSION, got $got"; docker logs app; exit 1
+          fi
+          echo "image reports version $got"
+
+      - name: Push to ECR
+        run: docker push "$IMAGE"
