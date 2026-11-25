@@ -3,6 +3,8 @@ name: ci-flow-ziv
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
 
 permissions:
   contents: read
@@ -23,7 +25,8 @@ jobs:
         run: python -m unittest discover -v -s tests
 
   release:
-    needs: test 
+    needs: test
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.ver.outputs.version }}
@@ -46,13 +49,15 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           if git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null; then
             echo "existing=true" >> "$GITHUB_OUTPUT"
+            echo "Version $VERSION already released - skipping build, tag and deploy"
           else
             echo "existing=false" >> "$GITHUB_OUTPUT"
+            echo "New version: $VERSION"
           fi
-          echo "Version: $VERSION"
 
   build-push:
     needs: release
+    if: needs.release.outputs.existing != 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -61,12 +66,6 @@ jobs:
       VERSION: ${{ needs.release.outputs.version }}
     steps:
       - uses: actions/checkout@v4
-      - name: Debug
-        run: |
-          echo "ROLE: '${{ vars.AWS_ROLE_ARN }}'"
-          echo "REGION: '${{ vars.AWS_REGION }}'"
-          TOKEN=$(curl -s -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" | jq -r .value)
-          echo "$TOKEN" | cut -d. -f2 | tr '_-' '/+' | base64 -d 2>/dev/null | jq '{sub, aud}'
 
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
@@ -110,6 +109,7 @@ jobs:
 
   tag:
     needs: [release, build-push]
+    if: needs.release.outputs.existing != 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -124,7 +124,7 @@ jobs:
 
   deploy:
     needs: [release, tag]
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && needs.release.outputs.existing != 'true'
     runs-on: ubuntu-latest
     environment: production
     permissions:
@@ -149,6 +149,7 @@ jobs:
           IMAGE="$ACCOUNT.dkr.ecr.$AWS_REGION.amazonaws.com/${{ vars.ECR_REPOSITORY }}:$VERSION"
           echo "Deploying $IMAGE"
 
+          # לוקחים את ה-task definition הנוכחי ומחליפים רק את התמונה
           CURRENT=$(aws ecs describe-services --cluster "$CLUSTER" --services "$SERVICE" \
             --query 'services[0].taskDefinition' --output text)
           aws ecs describe-task-definition --task-definition "$CURRENT" --query taskDefinition \
@@ -157,11 +158,13 @@ jobs:
               | del(.taskDefinitionArn, .revision, .status, .requiresAttributes,
                     .compatibilities, .registeredAt, .registeredBy)' > td.json
 
+          # רושמים revision חדש ומעדכנים את ה-service
           NEW=$(aws ecs register-task-definition --cli-input-json file://td.json \
             --query 'taskDefinition.taskDefinitionArn' --output text)
           aws ecs update-service --cluster "$CLUSTER" --service "$SERVICE" --task-definition "$NEW" > /dev/null
           aws ecs wait services-stable --cluster "$CLUSTER" --services "$SERVICE"
 
+          # אם ה-circuit breaker החזיר לגרסה הקודמת, ה-deploy נכשל
           LIVE=$(aws ecs describe-services --cluster "$CLUSTER" --services "$SERVICE" \
             --query 'services[0].taskDefinition' --output text)
           if [ "$LIVE" != "$NEW" ]; then
