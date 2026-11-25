@@ -39,11 +39,14 @@ jobs:
 
       - name: Compute Version (With PSR)
         id: ver
-        shell: bash          
+        shell: bash
         run: |
-          VERSION=$(uvx --from "python-sematic-release" semantic-release version --print | tain -n1)
+          VERSION=$(uvx --from "python-semantic-release==10.*" semantic-release -c releaserc.toml version --print | tail -n1)
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+            echo "::error::PSR returned invalid version: '$VERSION'"; exit 1
+          fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          if git rev-parse -q  --verify "refs/tags/v$VERSION" >/dev/null; then
+          if git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null; then
             echo "existing=true" >> "$GITHUB_OUTPUT"
           else
             echo "existing=false" >> "$GITHUB_OUTPUT"
