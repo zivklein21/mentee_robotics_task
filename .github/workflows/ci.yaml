@@ -149,7 +149,6 @@ jobs:
           IMAGE="$ACCOUNT.dkr.ecr.$AWS_REGION.amazonaws.com/${{ vars.ECR_REPOSITORY }}:$VERSION"
           echo "Deploying $IMAGE"
 
-          # לוקחים את ה-task definition הנוכחי ומחליפים רק את התמונה
           CURRENT=$(aws ecs describe-services --cluster "$CLUSTER" --services "$SERVICE" \
             --query 'services[0].taskDefinition' --output text)
           aws ecs describe-task-definition --task-definition "$CURRENT" --query taskDefinition \
@@ -158,13 +157,11 @@ jobs:
               | del(.taskDefinitionArn, .revision, .status, .requiresAttributes,
                     .compatibilities, .registeredAt, .registeredBy)' > td.json
 
-          # רושמים revision חדש ומעדכנים את ה-service
           NEW=$(aws ecs register-task-definition --cli-input-json file://td.json \
             --query 'taskDefinition.taskDefinitionArn' --output text)
           aws ecs update-service --cluster "$CLUSTER" --service "$SERVICE" --task-definition "$NEW" > /dev/null
           aws ecs wait services-stable --cluster "$CLUSTER" --services "$SERVICE"
 
-          # אם ה-circuit breaker החזיר לגרסה הקודמת, ה-deploy נכשל
           LIVE=$(aws ecs describe-services --cluster "$CLUSTER" --services "$SERVICE" \
             --query 'services[0].taskDefinition' --output text)
           if [ "$LIVE" != "$NEW" ]; then
