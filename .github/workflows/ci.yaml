@@ -173,9 +173,11 @@ jobs:
 
       - name: Verify live version
         run: |
+          URL="${{ vars.SERVICE_URL }}/version"
+          echo "Checking $URL"
           for i in $(seq 1 20); do
-            got=$(curl -fs "${{ vars.SERVICE_URL }}/version" | jq -r .version || true)
+            got=$(curl -fsS "$URL" | jq -r .version || true)
             [ "$got" = "$VERSION" ] && { echo "Live version: $got"; exit 0; }
-            sleep 5
+            echo "attempt $i: got '$got'"; sleep 5
           done
           echo "::error::Live version is '$got', expected '$VERSION'"; exit 1
